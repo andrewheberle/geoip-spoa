@@ -30,12 +30,14 @@ func main() {
 	}
 	f.String("config", "", "Path to configuration file")
 	f.String("listen", "127.0.0.1:3000", "SPOA listen address")
-	f.String("locale", "en", "Locale for names")
-	f.String("geoip.asn", "/var/lib/GeoIP/GeoLite2-ASN.mmdb", "GeoLite2 ASN database path")
-	f.String("geoip.city", "/var/lib/GeoIP/GeoLite2-City.mmdb", "GeoLite2 City database path")
+	f.String("locale", "en", "Locale for City names")
+	f.String("db.asn", "/var/lib/GeoIP/GeoLite2-ASN.mmdb", "GeoLite2 ASN database path")
+	f.String("db.city", "/var/lib/GeoIP/GeoLite2-City.mmdb", "GeoLite2 City database path")
 	f.String("metrics.path", "/metrics", "Path for Prometheus metrics")
 	f.String("metrics.listen", "", "Listen address for Prometheus metrics")
 	f.Duration("interval", time.Hour*24, "Interval between checks for new GeoLite2 databases")
+	f.Duration("cache.ttl", time.Hour*1, "TTL for caching of IP lookups (0 to disable)")
+	f.Int("cache.size", 1024, "Number of IP lookups to cache (0 to disable)")
 	f.Bool("debug", false, "Enable debug logging")
 	f.Bool("version", false, "Show version and exit")
 
@@ -97,12 +99,26 @@ func main() {
 	}
 
 	// load databases
-	asnPath := k.String("geoip.asn")
-	cityPath := k.String("geoip.city")
+	var db geoip.DB
+	asnPath := k.String("db.asn")
+	cityPath := k.String("db.city")
 	db, err := geoip.Open(asnPath, cityPath)
 	if err != nil {
 		logger.Error("there was an error loading the databases", "error", err, "asn", asnPath, "city", cityPath)
 		os.Exit(1)
+	}
+
+	// set up cache
+	cacheTtl := k.Duration("cache.ttl")
+	cacheSize := k.Int("cache.size")
+	if cacheTtl > 0 && cacheSize > 0 {
+		cache, err := geoip.NewCachingDB(db, cacheSize, cacheTtl)
+		if err != nil {
+			logger.Error("there was an error setting up the cache", "error", err, "ttl", cacheTtl, "size", cacheSize)
+			os.Exit(1)
+		}
+
+		db = cache
 	}
 
 	listenString := k.String("listen")

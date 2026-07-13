@@ -24,7 +24,7 @@ type Server struct {
 	addr     string
 	locale   string
 	logger   *slog.Logger
-	db       *geoip.DB
+	db       geoip.DB
 	registry *prometheus.Registry
 
 	ctx    context.Context
@@ -39,7 +39,7 @@ type Server struct {
 	reloadTotal       prometheus.Counter
 }
 
-func NewServer(addr string, db *geoip.DB, opts ...ServerOption) (*Server, error) {
+func NewServer(addr string, db geoip.DB, opts ...ServerOption) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Server{

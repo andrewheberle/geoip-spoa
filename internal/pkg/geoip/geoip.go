@@ -12,7 +12,14 @@ import (
 	"github.com/zeebo/xxh3"
 )
 
-type DB struct {
+type DB interface {
+	Lookup(ip net.IP) (*geoip2.ASN, *geoip2.CityResult, error)
+	Reload() (bool, error)
+}
+
+var _ DB = &GeoDB{}
+
+type GeoDB struct {
 	asnMu  sync.RWMutex
 	cityMu sync.RWMutex
 
@@ -24,8 +31,8 @@ type DB struct {
 	cityPath string
 }
 
-func Open(asnpath, citypath string) (*DB, error) {
-	db := &DB{
+func Open(asnpath, citypath string) (*GeoDB, error) {
+	db := &GeoDB{
 		asnPath:  asnpath,
 		cityPath: citypath,
 	}
@@ -76,7 +83,7 @@ type CityResult struct {
 	} `maxminddb:"continent"`
 }
 
-func (d *DB) Lookup(ip net.IP) (*geoip2.ASN, *geoip2.CityResult, error) {
+func (d *GeoDB) Lookup(ip net.IP) (*geoip2.ASN, *geoip2.CityResult, error) {
 	errs := make([]error, 0)
 
 	asn, err := d.lookupASN(ip)
@@ -94,7 +101,7 @@ func (d *DB) Lookup(ip net.IP) (*geoip2.ASN, *geoip2.CityResult, error) {
 	return asn, city, errors.Join(errs...)
 }
 
-func (d *DB) lookupASN(ip net.IP) (*geoip2.ASN, error) {
+func (d *GeoDB) lookupASN(ip net.IP) (*geoip2.ASN, error) {
 	if d.asn == nil {
 		return nil, fmt.Errorf("no ASN database loaded")
 	}
@@ -105,7 +112,7 @@ func (d *DB) lookupASN(ip net.IP) (*geoip2.ASN, error) {
 	return d.asn.Lookup(ip)
 }
 
-func (d *DB) lookupCity(ip net.IP) (*geoip2.CityResult, error) {
+func (d *GeoDB) lookupCity(ip net.IP) (*geoip2.CityResult, error) {
 	if d.city == nil {
 		return nil, fmt.Errorf("no City database loaded")
 	}
@@ -116,7 +123,7 @@ func (d *DB) lookupCity(ip net.IP) (*geoip2.CityResult, error) {
 	return d.city.Lookup(ip)
 }
 
-func (d *DB) Reload() (bool, error) {
+func (d *GeoDB) Reload() (bool, error) {
 	errs := make([]error, 0)
 	changed := false
 
@@ -139,7 +146,7 @@ func (d *DB) Reload() (bool, error) {
 	return changed, errors.Join(errs...)
 }
 
-func (d *DB) reloadASN() (bool, error) {
+func (d *GeoDB) reloadASN() (bool, error) {
 	if d.asnPath == "" {
 		return false, nil
 	}
@@ -170,7 +177,7 @@ func (d *DB) reloadASN() (bool, error) {
 	return true, nil
 }
 
-func (d *DB) reloadCity() (bool, error) {
+func (d *GeoDB) reloadCity() (bool, error) {
 	if d.cityPath == "" {
 		return false, nil
 	}
