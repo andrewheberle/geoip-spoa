@@ -6,8 +6,16 @@ made based on ASN, City, Country and/or Continent.
 
 ## GeoIP Databases
 
-The agent uses the GeoLite2 ASN and City databases from MaxMind so these will
+The agent uses the GeoLite2 ASN and City databases from MaxMind so these
 need to be available and kept updated for accuracy.
+
+On Debian/Ubuntu install the following packages:
+
+```sh
+apt install geoipupdate
+```
+
+Once installed add your account credentials to `/etc/GeoIP.conf`.
 
 ## HAProxy Integration
 
@@ -85,3 +93,61 @@ The following variables are returned by the agent to HAProxy:
 * txn.PREFIX.city (string) - The City of the source IP
 * txn.PREFIX.country (string) - The ISO code of the country of the source IP
 * txn.PREFIX.continent (string) - The ISO code of the continent of the source IP
+
+## Configuratuon
+
+The agent can be configured via a combination of command line flags, a
+configuration file and environment variables.
+
+Options are loaded in the following order, with the ability to override
+options from lower levels:
+
+1. Defaults
+2. Configuration file
+3. Environment variables
+4. Command line flags
+
+
+### Command Line
+
+The following command line options are supported:
+
+| Option         | Type       | Default                             | Description                                        |
+|----------------|------------|-------------------------------------|----------------------------------------------------|
+| cache.size     | `int`      | `1024`                              | Number of IP lookups to cache (0 to disable)       |
+| cache.ttl      | `duration` | `1h`                                | TTL for caching of IP lookups (0 to disable)       |
+| config         | `string`   |                                     | Path to YAML configuration file                    |
+| db.asn         | `string`   | `/var/lib/GeoIP/GeoLite2-ASN.mmdb`  | GeoLite2 ASN database path                         |
+| db.city        | `string`   | `/var/lib/GeoIP/GeoLite2-City.mmdb` | GeoLite2 City database path                        |
+| debug          | `boolean`  | `false`                             | Enable debug logging                               |
+| interval       | `duration` | `24h`                               | Interval between checks for new GeoLite2 databases |
+| listen         | `string`   | `127.0.0.1:3000`                    | SPOA listen address                                |
+| locale         | `string`   | `en`                                | Locale for City names                              |
+| metrics.listen | `string`   |                                     | Listen address for Prometheus metrics              |
+| metrics.path   | `string`   | `/metrics`                          | Path for Prometheus metrics                        |
+| version        | `boolean`  | `false`                             | Show version and exit                              |
+
+### Environment
+
+All of the above command-line options can be provided as environemnt
+variables as follows:
+
+```sh
+# Disable cache and enable metrics on port 9200
+GEOIP_CACHE_SIZE="0" GEOIP_METRICS_LISTEN=":9200" geoip-spoa
+```
+
+### Configuration File
+
+A YAML based configuration can be loaded via the `--config` option:
+
+```yaml
+cache:
+  size: 0
+db:
+  asn: /var/lib/GeoIP/GeoLite2-ASN.mmdb
+  city: /var/lib/GeoIP/GeoLite2-City.mmdb
+debug: false
+metrics:
+  listen: ':9200'
+```
