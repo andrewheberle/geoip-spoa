@@ -31,8 +31,8 @@ func main() {
 	f.String("config", "", "Path to configuration file")
 	f.String("listen", "127.0.0.1:3000", "SPOA listen address")
 	f.String("locale", "en", "Locale for names")
-	f.String("geoip.asn", "/var/lib/GeoIP/GeoLite2-ASN.mmdb", "GeoLite2 ASN database path")
-	f.String("geoip.city", "/var/lib/GeoIP/GeoLite2-City.mmdb", "GeoLite2 City database path")
+	f.String("db.asn", "/var/lib/GeoIP/GeoLite2-ASN.mmdb", "GeoLite2 ASN database path")
+	f.String("db.city", "/var/lib/GeoIP/GeoLite2-City.mmdb", "GeoLite2 City database path")
 	f.String("metrics.path", "/metrics", "Path for Prometheus metrics")
 	f.String("metrics.listen", "", "Listen address for Prometheus metrics")
 	f.Duration("interval", time.Hour*24, "Interval between checks for new GeoLite2 databases")
@@ -100,8 +100,8 @@ func main() {
 
 	// load databases
 	var db geoip.DB
-	asnPath := k.String("geoip.asn")
-	cityPath := k.String("geoip.city")
+	asnPath := k.String("db.asn")
+	cityPath := k.String("db.city")
 	db, err := geoip.Open(asnPath, cityPath)
 	if err != nil {
 		logger.Error("there was an error loading the databases", "error", err, "asn", asnPath, "city", cityPath)

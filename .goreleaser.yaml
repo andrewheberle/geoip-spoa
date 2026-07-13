@@ -68,3 +68,19 @@ sboms:
     disable: false
   - artifacts: archive
     disable: false
+
+nfpms:
+  - ids:
+      - default
+    homepage: https://github.com/andrewheberle/geoip-spoa
+    maintainer: Andrew Heberle <andrew.heberle@gmail.com>
+    description: |-
+      A Stream Processing Offload Agent (SPOE) that handles GeoIP lookups
+      for HAProxy.
+    license: Apache 2.0
+    formats:
+      - deb
+    contents:
+      - src: systemd/
+        dst: /usr/lib/systemd/system
+    mtime: "{{ .CommitDate }}"
