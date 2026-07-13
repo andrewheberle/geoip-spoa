@@ -31,12 +31,7 @@ type Server struct {
 	cancel context.CancelFunc
 
 	// metrics
-	requestErrors     prometheus.Counter
-	requestTotal      prometheus.Counter
-	requestDuration   *prometheus.HistogramVec
-	reloadCheckErrors prometheus.Counter
-	reloadCheckTotal  prometheus.Counter
-	reloadTotal       prometheus.Counter
+	requestDuration *prometheus.HistogramVec
 }
 
 func NewServer(addr string, db geoip.DB, opts ...ServerOption) (*Server, error) {
@@ -57,45 +52,20 @@ func NewServer(addr string, db geoip.DB, opts ...ServerOption) (*Server, error) 
 	}
 
 	// set up metrics
-	s.requestErrors = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "geoip_agent_request_error_total",
-		Help: "Number of requests handled by the geoip lookup agent that had an error",
-	})
-	s.requestTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "geoip_agent_request_total",
-		Help: "Total number of requests handled by the geoip lookup agent.",
-	})
 	s.requestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "geoip_agent_request_duration_seconds",
 			Help:    "Latency of request handling by the geoip lookup agent.",
-			Buckets: prometheus.DefBuckets,
+			Buckets: []float64{.0001, .00025, .0005, .001, .0025, .005, .01, .025, .05, .1, .25},
 		},
 		[]string{"status"},
 	)
-	s.reloadTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "geoip_agent_reload_total",
-		Help: "Number of reloads of GeoIP databases.",
-	})
-	s.reloadCheckErrors = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "geoip_agent_reload_check_error_total",
-		Help: "Number of reload checks of the GeoIP databases that had an error.",
-	})
-	s.reloadCheckTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "geoip_agent_reload_check_total",
-		Help: "Total number of reload checks of the GeoIP databases.",
-	})
 
 	// register metrics
 	s.registry.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		s.reloadCheckErrors,
-		s.reloadCheckTotal,
-		s.reloadTotal,
 		s.requestDuration,
-		s.requestErrors,
-		s.requestTotal,
 	)
 
 	return s, nil
@@ -150,14 +120,12 @@ func (s *Server) handler(req *request.Request) {
 	defer func() {
 		s.requestDuration.WithLabelValues(status).Observe(time.Since(start).Seconds())
 	}()
-	s.requestTotal.Inc()
 
 	logger := s.logger.With("engineID", req.EngineID, "streamID", req.StreamID, "frameID", req.FrameID, "messages", req.Messages.Len())
 
 	msg, err := req.Messages.GetByName(MessageName)
 	if err != nil {
 		status = "error"
-		s.requestErrors.Inc()
 		s.logger.Info("message was not found")
 		return
 	}
@@ -165,7 +133,6 @@ func (s *Server) handler(req *request.Request) {
 	ipValue, ok := msg.KV.Get("ip")
 	if !ok {
 		status = "error"
-		s.requestErrors.Inc()
 		logger.Warn("ip was not found in message")
 		return
 	}
@@ -173,7 +140,6 @@ func (s *Server) handler(req *request.Request) {
 	ip, ok := ipValue.(net.IP)
 	if !ok {
 		status = "error"
-		s.requestErrors.Inc()
 		logger.Warn("ip has incorrect type expected IP address")
 		return
 	}
@@ -182,7 +148,6 @@ func (s *Server) handler(req *request.Request) {
 	asn, city, err := s.db.Lookup(ip)
 	if err != nil {
 		status = "error"
-		s.requestErrors.Inc()
 		logger.Error("error looking up ip address", "error", err)
 		return
 	}
