@@ -36,6 +36,8 @@ func main() {
 	f.String("metrics.path", "/metrics", "Path for Prometheus metrics")
 	f.String("metrics.listen", "", "Listen address for Prometheus metrics")
 	f.Duration("interval", time.Hour*24, "Interval between checks for new GeoLite2 databases")
+	f.Duration("cache.ttl", time.Hour*1, "TTL for caching of IP lookups")
+	f.Int("cache.size", 1024, "Number of IP lookups to cache (0 to disable)")
 	f.Bool("debug", false, "Enable debug logging")
 	f.Bool("version", false, "Show version and exit")
 
@@ -97,12 +99,24 @@ func main() {
 	}
 
 	// load databases
+	var db geoip.DB
 	asnPath := k.String("geoip.asn")
 	cityPath := k.String("geoip.city")
 	db, err := geoip.Open(asnPath, cityPath)
 	if err != nil {
 		logger.Error("there was an error loading the databases", "error", err, "asn", asnPath, "city", cityPath)
 		os.Exit(1)
+	}
+
+	// set up cache
+	if ttl := k.Duration("cache.ttl"); ttl > 0 {
+		cache, err := geoip.NewCachingDB(db, k.Int("cache.size"), ttl)
+		if err != nil {
+			logger.Error("there was an error setting up the cache", "error", err)
+			os.Exit(1)
+		}
+
+		db = cache
 	}
 
 	listenString := k.String("listen")
