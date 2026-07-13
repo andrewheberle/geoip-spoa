@@ -141,11 +141,16 @@ func main() {
 			logger.Info("starting metrics listener", "listen", metricsListen, "path", metricsPath)
 			return metrics.ListenAndServe()
 		}, func(err error) {
+			if err != nil {
+				logger.Error("got error from metrics listener", "error", err, "listen", metricsListen, "path", metricsPath)
+			}
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 				defer cancel()
 
-				metrics.Shutdown(ctx)
+				if err := metrics.Shutdown(ctx); err != nil {
+					logger.Error("got error while shutting down metrics listener", "error", err, "listen", metricsListen, "path", metricsPath)
+				}
 			}()
 		})
 	}

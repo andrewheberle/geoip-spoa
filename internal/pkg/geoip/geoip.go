@@ -146,7 +146,7 @@ func (d *DB) reloadASN() (bool, error) {
 
 	hash, err := hashFile(d.asnPath)
 	if err != nil {
-		return false, fmt.Errorf("could not hash asn database: %w")
+		return false, fmt.Errorf("could not hash asn database: %w", err)
 	}
 
 	d.asnMu.RLock()
@@ -159,7 +159,7 @@ func (d *DB) reloadASN() (bool, error) {
 
 	data, err := geoip2.NewASNReaderFromFile(d.asnPath)
 	if err != nil {
-		return false, fmt.Errorf("could not load new asn database: %w")
+		return false, fmt.Errorf("could not load new asn database: %w", err)
 	}
 
 	d.asnMu.Lock()
@@ -177,7 +177,7 @@ func (d *DB) reloadCity() (bool, error) {
 
 	hash, err := hashFile(d.cityPath)
 	if err != nil {
-		return false, fmt.Errorf("could not hash city database: %w")
+		return false, fmt.Errorf("could not hash city database: %w", err)
 	}
 
 	d.cityMu.RLock()
@@ -190,7 +190,7 @@ func (d *DB) reloadCity() (bool, error) {
 
 	data, err := geoip2.NewCityReaderFromFile(d.cityPath)
 	if err != nil {
-		return false, fmt.Errorf("could not load new city database: %w")
+		return false, fmt.Errorf("could not load new city database: %w", err)
 	}
 
 	d.cityMu.Lock()
@@ -206,7 +206,9 @@ func hashFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("opening file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	hasher := xxh3.New()
 
