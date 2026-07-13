@@ -1,7 +1,13 @@
 # geoip-spoa
 
-This is a Stream Processing Offload Engine (SPOA) for use with HAProxy to
-perform GeoIP lookups of requests.
+This is a Stream Processing Offload Agent (SPOA) for use with HAProxy to
+perform GeoIP lookups of requests so access or routing decisions can be
+made based on ASN, City, Country and/or Continent.
+
+## GeoIP Databases
+
+The agent uses the GeoLite2 ASN and City databases from MaxMind so these will
+need to be available and kept updated for accuracy.
 
 ## HAProxy Integration
 
@@ -70,3 +76,12 @@ spoe-message geoip-lookup
 spoe-group lookup
     messages geoip-lookup
 ```
+
+### Returned Variables
+
+The following variables are returned by the agent to HAProxy:
+
+* txn.PREFIX.asn (integer) - The ASN of the source IP
+* txn.PREFIX.city (string) - The City of the source IP
+* txn.PREFIX.country (string) - The ISO code of the country of the source IP
+* txn.PREFIX.continent (string) - The ISO code of the continent of the source IP
