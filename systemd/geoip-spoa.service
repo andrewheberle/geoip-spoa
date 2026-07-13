@@ -1,0 +1,11 @@
+[Unit]
+Description=GeoIP SPOA Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/geoip-spoa
+DynamicUser=yes
+
+[Install]
+WantedBy=default.target
