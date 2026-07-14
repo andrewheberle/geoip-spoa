@@ -1,5 +1,7 @@
 # geoip-spoa
 
+[![codecov](https://codecov.io/gh/andrewheberle/geoip-spoa/graph/badge.svg?token=4y31WEx0JP)](https://codecov.io/gh/andrewheberle/geoip-spoa)
+
 This is a Stream Processing Offload Agent (SPOA) for use with HAProxy to
 perform GeoIP lookups of requests so access or routing decisions can be
 made based on ASN, Organisation, City, Country and/or Continent.
