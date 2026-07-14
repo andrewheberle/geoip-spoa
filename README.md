@@ -8,16 +8,25 @@ made based on ASN, Organisation, City, Country and/or Continent.
 
 ## GeoIP Databases
 
-The agent uses the GeoLite2 ASN and City databases from MaxMind so these
-need to be available and kept updated for accuracy.
+The agent uses the GeoLite2 ASN and City databases in MMDB format from MaxMind
+so these need to be available and kept updated for accuracy.
 
-On Debian/Ubuntu install the following packages:
+On Debian/Ubuntu install the following package:
 
 ```sh
 apt install geoipupdate
 ```
 
-Once installed add your account credentials to `/etc/GeoIP.conf`.
+Once installed add your account credentials to `/etc/GeoIP.conf` (this requires
+registering an account with MaxMind).
+
+It is important to ensure your use of the GeoLite2 databases is within what is
+allowed under the EULA on MaxMind's website
+[here](https://www.maxmind.com/en/geolite2/eula).
+
+Any database in MMDB format is supported so there is no reason this SPOA could
+not be used with commercially licensed GeoIP database products or databases
+generated with custom data, however neither of these options have been tested.
 
 ## HAProxy Integration
 
@@ -122,7 +131,7 @@ The following command line options are supported:
 | Option         | Type       | Default                             | Description                                        |
 |----------------|------------|-------------------------------------|----------------------------------------------------|
 | cache.size     | `int`      | `1024`                              | Number of IP lookups to cache (0 to disable)       |
-| cache.ttl      | `duration` | `1h`                                | TTL for caching of IP lookups (0 to disable)       |
+| cache.ttl      | `duration` | `0`                                 | TTL for caching of IP lookups (0 to never expire)  |
 | config         | `string`   |                                     | Path to YAML configuration file                    |
 | db.asn         | `string`   | `/var/lib/GeoIP/GeoLite2-ASN.mmdb`  | GeoLite2 ASN database path                         |
 | db.city        | `string`   | `/var/lib/GeoIP/GeoLite2-City.mmdb` | GeoLite2 City database path                        |
