@@ -1,3 +1,5 @@
 dist/
 geoip-spoa
 !cmd/geoip-spoa
+coverage.txt
+
