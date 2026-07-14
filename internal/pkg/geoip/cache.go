@@ -19,9 +19,9 @@ type cacheEntry struct {
 // CachingDB wraps a DB implementation and caches Lookup results in an
 // in-memory LRU cache.
 type CachingDB struct {
-	underlying DB
-	ttl        time.Duration
-	cache      *lru.Cache[string, cacheEntry]
+	db    DB
+	ttl   time.Duration
+	cache *lru.Cache[string, cacheEntry]
 }
 
 // NewCachingDB wraps db with an in-memory LRU cache holding up to size
@@ -35,12 +35,14 @@ func NewCachingDB(db DB, size int, ttl time.Duration) (*CachingDB, error) {
 	}
 
 	return &CachingDB{
-		underlying: db,
-		ttl:        ttl,
-		cache:      c,
+		db:    db,
+		ttl:   ttl,
+		cache: c,
 	}, nil
 }
 
+// Lookup will return cached results of a previous Lookup if found or perfom a
+// Lookup against the underlying DB and then cache and return the result.
 func (c *CachingDB) Lookup(ip net.IP) (*geoip2.ASN, *geoip2.CityResult, error) {
 	key := ip.String()
 
@@ -50,7 +52,7 @@ func (c *CachingDB) Lookup(ip net.IP) (*geoip2.ASN, *geoip2.CityResult, error) {
 		}
 	}
 
-	asn, city, err := c.underlying.Lookup(ip)
+	asn, city, err := c.db.Lookup(ip)
 
 	c.cache.Add(key, cacheEntry{
 		asn:     asn,
@@ -65,7 +67,7 @@ func (c *CachingDB) Lookup(ip net.IP) (*geoip2.ASN, *geoip2.CityResult, error) {
 // Reload delegates to the underlying DB and purges the cache on success,
 // since the underlying data may have changed.
 func (c *CachingDB) Reload() (bool, error) {
-	reloaded, err := c.underlying.Reload()
+	reloaded, err := c.db.Reload()
 	if err != nil {
 		return reloaded, err
 	}

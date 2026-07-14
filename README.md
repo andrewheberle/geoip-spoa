@@ -2,7 +2,7 @@
 
 This is a Stream Processing Offload Agent (SPOA) for use with HAProxy to
 perform GeoIP lookups of requests so access or routing decisions can be
-made based on ASN, City, Country and/or Continent.
+made based on ASN, Organisation, City, Country and/or Continent.
 
 ## GeoIP Databases
 
@@ -89,10 +89,15 @@ spoe-group lookup
 
 The following variables are returned by the agent to HAProxy:
 
-* txn.PREFIX.asn (integer) - The ASN of the source IP
+* txn.PREFIX.asn (integer) - The AS Number of the source IP
+* txn.PREFIX.org (string) - The AS Organisation of the source IP
 * txn.PREFIX.city (string) - The City of the source IP
 * txn.PREFIX.country (string) - The ISO code of the country of the source IP
 * txn.PREFIX.continent (string) - The ISO code of the continent of the source IP
+
+**Note:** If a lookup returns no data because the IP address was not found in
+one of the databases, this is not considered an error, but instead one or more
+of the above values returned to HAProxy may be blank.
 
 ## Configuratuon
 
@@ -150,4 +155,21 @@ db:
 debug: false
 metrics:
   listen: ':9200'
+```
+
+## Caching
+
+Caching of lookup responses from the GeoLite2 ASN and City databases is
+cached in memory by default with lookup results cached until they are evicted
+under LRU pressure or cleared on a reload of either database.
+
+Setting `cache.size` to zero disables caching.
+
+Based on repeated lookups of a single IP address caching provides close to a
+10x performance boost.
+
+```
+cpu: 13th Gen Intel(R) Core(TM) i5-1335U
+BenchmarkLookup_Uncached-12    	 1207038	       971.6 ns/op	     744 B/op	       9 allocs/op
+BenchmarkLookup_Cached-12      	11428749	       105.6 ns/op	       8 B/op	       1 allocs/op
 ```

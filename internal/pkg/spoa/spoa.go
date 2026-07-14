@@ -149,19 +149,28 @@ func (s *Server) handler(req *request.Request) {
 	if err != nil {
 		status = "error"
 		logger.Error("error looking up ip address", "error", err)
-		return
 	}
 
-	// add info to request
+	// handle city in case it's missing or not available in chosen locale
+	cityName, ok := city.City.Names[s.locale]
+	if !ok {
+		cityName = ""
+	}
+
+	// add vars to the request
 	req.Actions.SetVar(action.ScopeTransaction, "asn", asn.AutonomousSystemNumber)
+	req.Actions.SetVar(action.ScopeTransaction, "org", asn.AutonomousSystemOrganization)
 	req.Actions.SetVar(action.ScopeTransaction, "continent", city.Continent.Code)
 	req.Actions.SetVar(action.ScopeTransaction, "country", city.Country.ISOCode)
-	if city, ok := city.City.Names[s.locale]; ok {
-		req.Actions.SetVar(action.ScopeTransaction, "city", city)
-		logger = logger.With("city", city)
-	}
+	req.Actions.SetVar(action.ScopeTransaction, "city", cityName)
 
-	logger.Debug("handled request", "asn", asn.AutonomousSystemNumber, "continent", city.Continent.Code, "country", city.Country.ISOCode)
+	logger.Debug("handled request",
+		"asn", asn.AutonomousSystemNumber,
+		"org", asn.AutonomousSystemOrganization,
+		"continent", city.Continent.Code,
+		"country", city.Country.ISOCode,
+		"city", cityName,
+	)
 }
 
 func (s *Server) Errorf(format string, args ...any) {
