@@ -14,16 +14,15 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 2
-
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-
+        with:
+          go-version: stable
+          cache: false
       - name: Install dependencies
         run: go mod download
-
       - name: Run tests
         run: go test -coverprofile=coverage.txt
-
       - name: Upload results to Codecov
         uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
         with:
