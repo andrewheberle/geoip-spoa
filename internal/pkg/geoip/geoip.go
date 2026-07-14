@@ -70,32 +70,27 @@ func Open(asnpath, citypath string) (*GeoDB, error) {
 	return db, nil
 }
 
-type AsnResult struct {
-	Number uint `maxminddb:"autonomous_system_number"`
-}
-
-type CityResult struct {
-	Country struct {
-		ISOCode string `maxminddb:"iso_code"`
-	} `maxminddb:"country"`
-	Continent struct {
-		Code string `maxminddb:"code"`
-	} `maxminddb:"continent"`
-}
-
+// Lookup performs a GeoIP lookup against the underlying GeoLite2 ASN and City
+// databases. If an error occurs during either lookup one (or both) errors are
+// returned along with minimal "zero value" geoip2.ASN and geoip2.CityResult
+// results rather than returning nil values.
 func (d *GeoDB) Lookup(ip net.IP) (*geoip2.ASN, *geoip2.CityResult, error) {
 	errs := make([]error, 0)
 
 	asn, err := d.lookupASN(ip)
 	if err != nil {
-		errs = append(errs, err)
+		errs = append(errs, fmt.Errorf("could not look up ASN: %w", err))
 		asn = &geoip2.ASN{}
 	}
 
 	city, err := d.lookupCity(ip)
 	if err != nil {
-		errs = append(errs, err)
-		city = &geoip2.CityResult{}
+		errs = append(errs, fmt.Errorf("could not look up City: %w", err))
+		city = &geoip2.CityResult{
+			City: geoip2.City{
+				Names: make(map[string]string),
+			},
+		}
 	}
 
 	return asn, city, errors.Join(errs...)
@@ -123,6 +118,11 @@ func (d *GeoDB) lookupCity(ip net.IP) (*geoip2.CityResult, error) {
 	return d.city.Lookup(ip)
 }
 
+// Reload checks the current on-disk hash of the loaded GeoLite2 databases
+// and will reload those files if they have changed.
+// The function will return true if one (or both) databases were reloaded
+// and any errors during the reload process. The current version of each
+// database is only replaced if it could be successfully loaded.
 func (d *GeoDB) Reload() (bool, error) {
 	errs := make([]error, 0)
 	changed := false
