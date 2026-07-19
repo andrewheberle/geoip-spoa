@@ -170,7 +170,7 @@ metrics:
 
 ## Caching
 
-Caching of lookup responses from the GeoLite2 ASN and City databases is
+Lookup responses from the GeoLite2 ASN and City databases are
 cached in memory by default with lookup results cached until they are evicted
 under LRU pressure or cleared on a reload of either database.
 
