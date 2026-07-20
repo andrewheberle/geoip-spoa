@@ -139,6 +139,7 @@ The following command line options are supported:
 | interval       | `duration` | `24h`                               | Interval between checks for new GeoLite2 databases |
 | listen         | `string`   | `127.0.0.1:3000`                    | SPOA listen address                                |
 | locale         | `string`   | `en`                                | Locale for City names                              |
+| logger.type    | `string`   | `auto`                              | Logger type (auto, systemd, json or text)          |
 | metrics.listen | `string`   |                                     | Listen address for Prometheus metrics              |
 | metrics.path   | `string`   | `/metrics`                          | Path for Prometheus metrics                        |
 | version        | `boolean`  | `false`                             | Show version and exit                              |
@@ -184,3 +185,25 @@ cpu: 13th Gen Intel(R) Core(TM) i5-1335U
 BenchmarkLookup_Uncached-12    	 1207038	       971.6 ns/op	     744 B/op	       9 allocs/op
 BenchmarkLookup_Cached-12      	11428749	       105.6 ns/op	       8 B/op	       1 allocs/op
 ```
+
+## Logging
+
+By default the service will log to `stderr` in one of two formats based on the
+default of `auto`:
+
+1. If running under systemd it will output in a format expected by
+   `sd_journal_stream_fd`:
+
+	```text
+	<LEVEL> MESSAGE KEY=VALUE...
+	```
+2. Otherwise it will output as text using `slog.NewTextHandler`
+
+The supported options for `logger.type` are:
+
+* `auto`: Detects if the service is being started by systemd (default)
+* `discard`: Disables logging using `slog.DiscardHandler`
+* `json`: Outputs as JSON using `slog.NewJsonHandler`
+* `systemd`: Outputs in `sd_journal_stream_fd` format using a custom
+  `slog.Handler`
+* `text`: Outputs as text using `slog.NewTextHandler`
