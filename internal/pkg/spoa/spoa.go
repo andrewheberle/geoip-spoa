@@ -154,7 +154,7 @@ func (s *Server) handler(req *request.Request) {
 	// handle city in case it's missing or not available in chosen locale
 	cityName, ok := city.City.Names[s.locale]
 	if !ok {
-		cityName = ""
+		logger.Warn("city name for chosen locale was not available", "locale", s.locale)
 	}
 
 	// add vars to the request
