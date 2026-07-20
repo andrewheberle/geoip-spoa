@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/andrewheberle/geoip-spoa/internal/pkg/geoip"
+	"github.com/andrewheberle/geoip-spoa/internal/pkg/logger"
 	"github.com/andrewheberle/geoip-spoa/internal/pkg/spoa"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/env/v2"
@@ -23,11 +24,9 @@ import (
 var Version = "dev"
 
 func main() {
-	f := pflag.NewFlagSet("config", pflag.ContinueOnError)
-	f.Usage = func() {
-		fmt.Println(f.FlagUsages())
-		os.Exit(0)
-	}
+	lt := new(logger.LoggerTypeVar)
+
+	f := pflag.NewFlagSet("geoip-spoa", pflag.ContinueOnError)
 	f.String("config", "", "Path to configuration file")
 	f.String("listen", "127.0.0.1:3000", "SPOA listen address")
 	f.String("locale", "en", "Locale for City names")
@@ -40,6 +39,7 @@ func main() {
 	f.Int("cache.size", 1024, "Number of IP lookups to cache (0 to disable)")
 	f.Bool("debug", false, "Enable debug logging")
 	f.Bool("version", false, "Show version and exit")
+	f.Var(lt, "logger.type", "Logger type (auto, discard, json, systemd or text)")
 
 	// parse command line
 	if err := f.Parse(os.Args[1:]); err != nil {
@@ -49,7 +49,7 @@ func main() {
 
 	// handle if version was requested
 	if version, err := f.GetBool("version"); err == nil && version {
-		fmt.Printf("geoip-spoa %s\n", Version)
+		fmt.Printf("%s %s\n", f.Name(), Version)
 		os.Exit(0)
 	}
 
@@ -93,7 +93,12 @@ func main() {
 
 	// set up logger
 	logLevel := new(slog.LevelVar)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+	ltString := k.String("logger.type")
+	logger, err := logger.NewLogger(logLevel, logger.WithLoggerType(logger.LoggerType(ltString)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error setting up logger: %s\n", err)
+		os.Exit(1)
+	}
 	if k.Bool("debug") {
 		logLevel.Set(slog.LevelDebug)
 	}
@@ -102,7 +107,7 @@ func main() {
 	var db geoip.DB
 	asnPath := k.String("db.asn")
 	cityPath := k.String("db.city")
-	db, err := geoip.Open(asnPath, cityPath)
+	db, err = geoip.Open(asnPath, cityPath)
 	if err != nil {
 		logger.Error("there was an error loading the databases", "error", err, "asn", asnPath, "city", cityPath)
 		os.Exit(1)
