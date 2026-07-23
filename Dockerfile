@@ -2,5 +2,5 @@ FROM gcr.io/distroless/base-debian13:nonroot@sha256:97b9d04bed1c754b756c3c4b6a04
 ARG TARGETPLATFORM
 ENV GEOIP_LISTEN=":3000" GEOIP_METRICS_LISTEN=":8080"
 EXPOSE 3000 8080
-ENTRYPOINT [ "/usr/bin/geiop-spoa" ]
-COPY $TARGETPLATFORM/geiop-spoa /usr/bin/
+ENTRYPOINT [ "/usr/bin/geoip-spoa" ]
+COPY $TARGETPLATFORM/geoip-spoa /usr/bin/

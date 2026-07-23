@@ -90,7 +90,7 @@ gomod:
 
 dockers_v2:
   - images:
-      - "ghcr.io/andrewheberle/jwt-spoa"
+      - "ghcr.io/andrewheberle/geoip-spoa"
     ids:
       - default
     tags:
