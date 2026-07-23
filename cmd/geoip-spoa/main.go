@@ -6,17 +6,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
+	"github.com/andrewheberle/configger"
 	"github.com/andrewheberle/geoip-spoa/internal/pkg/geoip"
-	"github.com/andrewheberle/geoip-spoa/internal/pkg/logger"
 	"github.com/andrewheberle/geoip-spoa/internal/pkg/spoa"
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/env/v2"
-	"github.com/knadh/koanf/providers/file"
-	"github.com/knadh/koanf/providers/posflag"
-	"github.com/knadh/koanf/v2"
+	"github.com/andrewheberle/slogger"
 	"github.com/oklog/run"
 	"github.com/spf13/pflag"
 )
@@ -24,7 +19,7 @@ import (
 var Version = "dev"
 
 func main() {
-	lt := new(logger.LoggerTypeVar)
+	lt := new(slogger.LoggerTypeVar)
 
 	f := pflag.NewFlagSet("geoip-spoa", pflag.ContinueOnError)
 	f.String("config", "", "Path to configuration file")
@@ -53,48 +48,15 @@ func main() {
 		os.Exit(0)
 	}
 
-	k := koanf.New(".")
-
-	// load any config file
-	if config, err := f.GetString("config"); err != nil {
-		fmt.Fprintf(os.Stderr, "error getting flag value: %s\n", err)
-		os.Exit(1)
-	} else if config != "" {
-		if err := k.Load(file.Provider(config), yaml.Parser()); err != nil {
-			fmt.Fprintf(os.Stderr, "error loading configuration: %s\n", err)
-			os.Exit(1)
-		}
-	}
-
-	// Load env vars
-	if err := k.Load(env.Provider(".", env.Opt{
-		Prefix: "GEOIP_",
-		TransformFunc: func(k, v string) (string, any) {
-			// Transform the key.
-			k = strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(k, "GEOIP_")), "_", ".")
-
-			// Transform values with commas into slices
-			if strings.Contains(v, ",") {
-				return k, strings.Split(v, ",")
-			}
-
-			return k, v
-		},
-	}), nil); err != nil {
-		fmt.Fprintf(os.Stderr, "error reading env vars: %s\n", err)
-		os.Exit(1)
-	}
-
-	// Load command line options
-	if err := k.Load(posflag.Provider(f, ".", k), nil); err != nil {
-		fmt.Fprintf(os.Stderr, "error reading command line: %s\n", err)
+	k, err := configger.LoadConfig(f, configger.WithEnvPrefix("geoip"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error loading configuration: %s\n", err)
 		os.Exit(1)
 	}
 
 	// set up logger
 	logLevel := new(slog.LevelVar)
-	ltString := k.String("logger.type")
-	logger, err := logger.NewLogger(logLevel, logger.WithLoggerType(logger.LoggerType(ltString)))
+	logger, err := slogger.NewLogger(logLevel, lt.LoggerTypeOption())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error setting up logger: %s\n", err)
 		os.Exit(1)
