@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/IncSW/geoip2 v0.1.4
-	github.com/andrewheberle/configger v0.1.0
+	github.com/andrewheberle/configger v0.1.1
 	github.com/andrewheberle/slogger v0.2.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/negasus/haproxy-spoe-go v1.0.7
