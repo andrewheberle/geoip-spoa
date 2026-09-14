@@ -1,4 +1,4 @@
-FROM gcr.io/distroless/base-debian13:nonroot@sha256:97b9d04bed1c754b756c3c4b6a04915c22fb0b5d96a59944eb3bf78c26e6e157
+FROM gcr.io/distroless/base-debian13:nonroot@sha256:0896741ba5bafd3ac87ea025a5f578952f2d238ddc3614cb368acc983a687aa2
 ARG TARGETPLATFORM
 ENV GEOIP_LISTEN=":3000" GEOIP_METRICS_LISTEN=":8080"
 EXPOSE 3000 8080
