@@ -7,7 +7,7 @@ require (
 	github.com/andrewheberle/configger v0.1.0
 	github.com/andrewheberle/slogger v0.2.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/negasus/haproxy-spoe-go v1.0.7
+	github.com/negasus/haproxy-spoe-go v1.0.8
 	github.com/oklog/run v1.2.0
 	github.com/prometheus/client_golang v1.24.0
 	github.com/spf13/pflag v1.0.10
