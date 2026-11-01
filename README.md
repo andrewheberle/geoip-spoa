@@ -42,41 +42,41 @@ generated with custom data, however neither of these options have been tested.
 
 Add the config to you HAProxy configuration:
 
-```
+```haproxy
 # An example HTTP frontend
 frontend fe_http
-	mode http
+    mode http
 
-	acl allowed_asn var(txn.geoip.asn) -m int 12345
+    acl allowed_asn var(txn.geoip.asn) -m int 12345
 
-	filter spoe engine geoip config /etc/haproxy/spoe.cfg
+    filter spoe engine geoip config /etc/haproxy/spoe.cfg
 
-	http-request send-spoe-group geoip lookup
-	http-request reject unless allowed_asn
+    http-request send-spoe-group geoip lookup
+    http-request reject unless allowed_asn
 
-	# the rest of your frontend config is unchanged
+    # the rest of your frontend config is unchanged
 
 # An example TCP frontend
 frontend fe_tcp
-	mode tcp
+    mode tcp
 
-	acl allowed_asn var(txn.geoip.asn) -m int 12345
+    acl allowed_asn var(txn.geoip.asn) -m int 12345
 
-	filter spoe engine geoip config /etc/haproxy/spoe.cfg
+    filter spoe engine geoip config /etc/haproxy/spoe.cfg
 
-	tcp-request inspect-delay 500ms
-	tcp-request content send-spoe-group geoip lookup
+    tcp-request inspect-delay 500ms
+    tcp-request content send-spoe-group geoip lookup
     tcp-request content reject unless allowed_asn
 
-	# the rest of your frontend config is unchanged
+    # the rest of your frontend config is unchanged
 
 
 # This is the backend for communication with the agent
 backend be_spoe
-	timeout connect 5s
-	timeout server  5m
+    timeout connect 5s
+    timeout server  5m
 
-	server spoa 127.0.0.1:3000 check
+    server spoa 127.0.0.1:3000 check
 ```
 
 A dedicated SPOE configuration file must be created:
