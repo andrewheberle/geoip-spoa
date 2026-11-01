@@ -11,7 +11,7 @@ made based on ASN, Organisation, City, Country and/or Continent.
 A container image is published that can be run as follows:
 
 ```sh
-docker run -p 3000:3000 ghcr.io/andrewheberle/geoip-spoa:v0.5.1 # x-release-please-version
+docker run -p 3000:3000 ghcr.io/andrewheberle/geoip-spoa:v0.5.2 # x-release-please-version
 ```
 
 Binaries and APT packages are available from the Releases page.
