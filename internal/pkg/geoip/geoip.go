@@ -1,6 +1,7 @@
 package geoip
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/IncSW/geoip2"
 	"github.com/zeebo/xxh3"
@@ -24,15 +26,13 @@ type Location struct {
 	City      string
 }
 
-// DB looks up the Location of IP addresses and can reload its underlying data.
+// DB looks up the Location of IP addresses.
 type DB interface {
 	// Lookup returns the Location of ip. An IP address that is missing from
 	// one or both databases is not an error: the fields that could not be
 	// found are left empty. An error is only returned for a real failure,
 	// in which case any fields that were found are still populated.
 	Lookup(ip net.IP) (Location, error)
-	// Reload reports whether the underlying data changed.
-	Reload() (bool, error)
 }
 
 var _ DB = &GeoDB{}
@@ -48,8 +48,10 @@ type GeoDB struct {
 	cityHash string
 	cityPath string
 
-	locale string
-	logger *slog.Logger
+	locale   string
+	logger   *slog.Logger
+	cache    *lookupCache
+	interval time.Duration
 }
 
 // Option configures a GeoDB.
@@ -66,6 +68,24 @@ func WithLocale(locale string) Option {
 func WithLogger(logger *slog.Logger) Option {
 	return func(d *GeoDB) {
 		d.logger = logger
+	}
+}
+
+// WithCache caches up to size successful lookups in memory. A ttl of 0 means
+// entries never expire on their own; they are still evicted when the cache
+// is full and cleared whenever Reload loads a changed database. A size of 0
+// or less disables the cache, which is the default.
+func WithCache(size int, ttl time.Duration) Option {
+	return func(d *GeoDB) {
+		d.cache = newLookupCache(size, ttl)
+	}
+}
+
+// WithReloadInterval sets how often Run checks for changed database files.
+// An interval of 0 or less disables reloading, which is the default.
+func WithReloadInterval(interval time.Duration) Option {
+	return func(d *GeoDB) {
+		d.interval = interval
 	}
 }
 
@@ -117,8 +137,17 @@ func Open(asnpath, citypath string, opts ...Option) (*GeoDB, error) {
 }
 
 // Lookup performs a GeoIP lookup against the underlying GeoLite2 ASN and City
-// databases. See DB.Lookup for the error contract.
+// databases, using the cache if one is configured. See DB.Lookup for the
+// error contract.
 func (d *GeoDB) Lookup(ip net.IP) (Location, error) {
+	if d.cache != nil {
+		return d.cache.lookup(ip, d.lookup)
+	}
+
+	return d.lookup(ip)
+}
+
+func (d *GeoDB) lookup(ip net.IP) (Location, error) {
 	var loc Location
 	errs := make([]error, 0)
 
@@ -174,7 +203,8 @@ func (d *GeoDB) lookupCity(ip net.IP) (*geoip2.CityResult, error) {
 // and will reload those files if they have changed.
 // The function will return true if one (or both) databases were reloaded
 // and any errors during the reload process. The current version of each
-// database is only replaced if it could be successfully loaded.
+// database is only replaced if it could be successfully loaded. The cache is
+// cleared whenever either database changed, even if the other failed.
 func (d *GeoDB) Reload() (bool, error) {
 	errs := make([]error, 0)
 	changed := false
@@ -195,7 +225,42 @@ func (d *GeoDB) Reload() (bool, error) {
 		}
 	}
 
+	if changed && d.cache != nil {
+		d.cache.purge()
+	}
+
 	return changed, errors.Join(errs...)
+}
+
+// Run checks for changed database files every reload interval until ctx is
+// cancelled, then returns nil. If reloading is disabled it just waits for
+// ctx to be cancelled.
+func (d *GeoDB) Run(ctx context.Context) error {
+	if d.interval <= 0 {
+		<-ctx.Done()
+		return nil
+	}
+
+	d.logger.Info("starting background reload of GeoLite2 databases", "interval", d.interval, "asn", d.asnPath, "city", d.cityPath)
+	t := time.NewTicker(d.interval)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+			changed, err := d.Reload()
+			switch {
+			case err != nil:
+				d.logger.Warn("there was an error while reloading databases", "error", err, "changed", changed)
+			case changed:
+				d.logger.Info("new database version loaded")
+			default:
+				d.logger.Info("no changes detected to databases")
+			}
+		}
+	}
 }
 
 func (d *GeoDB) reloadASN() (bool, error) {

@@ -2,9 +2,11 @@ package geoip_test
 
 import (
 	"bytes"
-	"errors"
+	"context"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -57,15 +59,12 @@ func TestGeoDB_Lookup(t *testing.T) {
 	runLookupTests(t, open(t, testASN, testCity))
 }
 
-func TestCachingDB_Lookup(t *testing.T) {
-	cache, err := geoip.NewCachingDB(open(t, testASN, testCity), 10, time.Minute)
-	if err != nil {
-		t.Fatalf("NewCachingDB() error = %v", err)
-	}
+func TestGeoDB_Lookup_Cached(t *testing.T) {
+	db := open(t, testASN, testCity, geoip.WithCache(10, time.Minute))
 
 	// run twice so the second pass is served from the cache
-	runLookupTests(t, cache)
-	runLookupTests(t, cache)
+	runLookupTests(t, db)
+	runLookupTests(t, db)
 }
 
 func TestGeoDB_Lookup_Locale(t *testing.T) {
@@ -118,47 +117,193 @@ func TestGeoDB_Lookup_NoCityDatabase(t *testing.T) {
 	}
 }
 
-// countingDB is an in-memory DB adapter that counts lookups.
-type countingDB struct {
-	loc   geoip.Location
-	err   error
-	calls int
+// reloadFixture holds temporary copies of the test databases that a test can
+// overwrite to simulate new database versions.
+type reloadFixture struct {
+	asnPath, cityPath  string
+	asnEdited, asnOrig []byte
+	cityOrig           []byte
 }
 
-func (c *countingDB) Lookup(net.IP) (geoip.Location, error) {
-	c.calls++
-	return c.loc, c.err
+const (
+	reloadIP    = "89.160.20.112"
+	origOrg     = "Bredband2 AB"
+	editedOrg   = "Bredband3 AB"
+	corruptData = "not a maxmind database"
+)
+
+func newReloadFixture(t *testing.T) *reloadFixture {
+	t.Helper()
+
+	asn, err := os.ReadFile(testASN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	city, err := os.ReadFile(testCity)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// same-length edit keeps the database valid but changes its contents
+	edited := bytes.Replace(asn, []byte(origOrg), []byte(editedOrg), 1)
+	if bytes.Equal(edited, asn) {
+		t.Fatalf("test ASN database does not contain %q", origOrg)
+	}
+
+	dir := t.TempDir()
+	f := &reloadFixture{
+		asnPath:   filepath.Join(dir, "asn.mmdb"),
+		cityPath:  filepath.Join(dir, "city.mmdb"),
+		asnOrig:   asn,
+		asnEdited: edited,
+		cityOrig:  city,
+	}
+	f.write(t, f.asnPath, asn)
+	f.write(t, f.cityPath, city)
+
+	return f
 }
 
-func (c *countingDB) Reload() (bool, error) { return false, nil }
+func (f *reloadFixture) write(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
-func TestCachingDB_Lookup_DoesNotCacheErrors(t *testing.T) {
+func lookupOrg(t *testing.T, db geoip.DB) string {
+	t.Helper()
+	loc, err := db.Lookup(net.ParseIP(reloadIP))
+	if err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
+	return loc.Org
+}
+
+func TestGeoDB_Reload(t *testing.T) {
 	tests := []struct {
-		name      string
-		err       error
-		wantCalls int
+		name        string
+		asn, city   func(f *reloadFixture) []byte
+		wantChanged bool
+		wantErr     bool
+		wantOrg     string
 	}{
-		{"success is cached", nil, 1},
-		{"error is not cached", errors.New("boom"), 2},
+		{
+			name:    "unchanged",
+			wantOrg: origOrg,
+		},
+		{
+			name:        "changed",
+			asn:         func(f *reloadFixture) []byte { return f.asnEdited },
+			wantChanged: true,
+			wantOrg:     editedOrg,
+		},
+		{
+			name:    "corrupt keeps old data",
+			asn:     func(*reloadFixture) []byte { return []byte(corruptData) },
+			wantErr: true,
+			wantOrg: origOrg,
+		},
+		{
+			name:        "one changed and one corrupt",
+			asn:         func(f *reloadFixture) []byte { return f.asnEdited },
+			city:        func(*reloadFixture) []byte { return []byte(corruptData) },
+			wantChanged: true,
+			wantErr:     true,
+			wantOrg:     editedOrg,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inner := &countingDB{loc: geoip.Location{Country: "AU"}, err: tt.err}
-			cache, err := geoip.NewCachingDB(inner, 10, 0)
-			if err != nil {
-				t.Fatalf("NewCachingDB() error = %v", err)
+			f := newReloadFixture(t)
+			db := open(t, f.asnPath, f.cityPath, geoip.WithCache(10, 0))
+
+			// populate the cache
+			if got := lookupOrg(t, db); got != origOrg {
+				t.Fatalf("Lookup() org = %q, want %q", got, origOrg)
 			}
 
-			ip := net.ParseIP("192.0.2.1")
-			for range 2 {
-				if _, err := cache.Lookup(ip); !errors.Is(err, tt.err) {
-					t.Fatalf("Lookup() error = %v, want %v", err, tt.err)
-				}
+			if tt.asn != nil {
+				f.write(t, f.asnPath, tt.asn(f))
 			}
-			if inner.calls != tt.wantCalls {
-				t.Errorf("underlying Lookup calls = %d, want %d", inner.calls, tt.wantCalls)
+			if tt.city != nil {
+				f.write(t, f.cityPath, tt.city(f))
+			}
+
+			changed, err := db.Reload()
+			if changed != tt.wantChanged {
+				t.Errorf("Reload() changed = %v, want %v", changed, tt.wantChanged)
+			}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Reload() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			// a cached result that survived a change would return the old org
+			if got := lookupOrg(t, db); got != tt.wantOrg {
+				t.Errorf("Lookup() org = %q, want %q", got, tt.wantOrg)
 			}
 		})
+	}
+}
+
+func TestGeoDB_Run(t *testing.T) {
+	f := newReloadFixture(t)
+	db := open(t, f.asnPath, f.cityPath, geoip.WithCache(10, 0), geoip.WithReloadInterval(10*time.Millisecond))
+
+	if got := lookupOrg(t, db); got != origOrg {
+		t.Fatalf("Lookup() org = %q, want %q", got, origOrg)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- db.Run(ctx)
+	}()
+
+	f.write(t, f.asnPath, f.asnEdited)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for lookupOrg(t, db) != editedOrg {
+		if time.Now().After(deadline) {
+			t.Fatal("Run() did not load the changed database")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Run() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() did not return after cancel")
+	}
+}
+
+func TestGeoDB_Run_Disabled(t *testing.T) {
+	db := open(t, testASN, testCity)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- db.Run(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("Run() returned %v before cancel", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Run() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() did not return after cancel")
 	}
 }
 
@@ -173,14 +318,11 @@ func BenchmarkLookup_Uncached(b *testing.B) {
 }
 
 func BenchmarkLookup_Cached(b *testing.B) {
-	cache, err := geoip.NewCachingDB(open(b, testASN, testCity), 100, time.Minute)
-	if err != nil {
-		b.Fatalf("NewCachingDB() error = %v", err)
-	}
+	db := open(b, testASN, testCity, geoip.WithCache(100, time.Minute))
 	ip := net.ParseIP("8.8.8.8")
 
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = cache.Lookup(ip)
+		_, _ = db.Lookup(ip)
 	}
 }

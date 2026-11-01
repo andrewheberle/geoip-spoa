@@ -19,7 +19,6 @@ type fakeDB struct {
 }
 
 func (f fakeDB) Lookup(net.IP) (geoip.Location, error) { return f.loc, f.err }
-func (f fakeDB) Reload() (bool, error)                 { return false, nil }
 
 // newRequest builds a request carrying a single message with the given name
 // and, if ip is non-nil, an "ip" key holding it.
