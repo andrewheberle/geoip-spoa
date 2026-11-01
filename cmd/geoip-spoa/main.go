@@ -66,27 +66,21 @@ func main() {
 	}
 
 	// load databases
-	var db geoip.DB
 	asnPath := k.String("db.asn")
 	cityPath := k.String("db.city")
 	localeString := k.String("locale")
-	db, err = geoip.Open(asnPath, cityPath, geoip.WithLocale(localeString), geoip.WithLogger(logger))
+	cacheTtl := k.Duration("cache.ttl")
+	cacheSize := k.Int("cache.size")
+	interval := k.Duration("interval")
+	db, err := geoip.Open(asnPath, cityPath,
+		geoip.WithLocale(localeString),
+		geoip.WithLogger(logger),
+		geoip.WithCache(cacheSize, cacheTtl),
+		geoip.WithReloadInterval(interval),
+	)
 	if err != nil {
 		logger.Error("there was an error loading the databases", "error", err, "asn", asnPath, "city", cityPath, "locale", localeString)
 		os.Exit(1)
-	}
-
-	// set up cache
-	cacheTtl := k.Duration("cache.ttl")
-	cacheSize := k.Int("cache.size")
-	if cacheSize > 0 {
-		cache, err := geoip.NewCachingDB(db, cacheSize, cacheTtl)
-		if err != nil {
-			logger.Error("there was an error setting up the cache", "error", err, "ttl", cacheTtl, "size", cacheSize)
-			os.Exit(1)
-		}
-
-		db = cache
 	}
 
 	listenString := k.String("listen")
@@ -138,35 +132,12 @@ func main() {
 		})
 	}
 
-	interval := k.Duration("interval")
-	if interval != 0 {
-		done := make(chan bool)
-
-		g.Add(func() error {
-			logger.Info("starting background reload of GeoLite2 databases", "interval", interval, "asn", asnPath, "city", cityPath)
-			t := time.NewTicker(interval)
-			defer t.Stop()
-
-			for {
-				select {
-				case <-done:
-					return nil
-				case <-t.C:
-					if changed, err := db.Reload(); err != nil {
-						logger.Warn("there was an error while reloading databases", "error", err)
-					} else {
-						if changed {
-							logger.Info("new database version loaded")
-						} else {
-							logger.Info("no changes detected to databases")
-						}
-					}
-				}
-			}
-		}, func(err error) {
-			done <- true
-		})
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	g.Add(func() error {
+		return db.Run(ctx)
+	}, func(err error) {
+		cancel()
+	})
 
 	if err := g.Run(); err != nil {
 		logger.Error("got an error", "error", err)
