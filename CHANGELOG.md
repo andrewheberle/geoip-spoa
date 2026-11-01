@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3](https://github.com/andrewheberle/geoip-spoa/compare/v0.5.2...v0.5.3) (2026-11-01)
+
+
+### Bug Fixes
+
+* fix release process ([#44](https://github.com/andrewheberle/geoip-spoa/issues/44)) ([a0584a7](https://github.com/andrewheberle/geoip-spoa/commit/a0584a7a005b9917049a3d6890e006984d920b49))
+
 ## [0.5.2](https://github.com/andrewheberle/geoip-spoa/compare/v0.5.1...v0.5.2) (2026-11-01)
 
 
