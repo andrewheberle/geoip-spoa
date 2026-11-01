@@ -28,3 +28,4 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
+          args: release --clean --snapshot --skip sign
