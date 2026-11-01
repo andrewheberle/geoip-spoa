@@ -4,15 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
-	"os"
-	"sync"
 	"time"
 
 	"github.com/IncSW/geoip2"
-	"github.com/zeebo/xxh3"
 )
 
 // Location holds the geographic and network facts about one IP address that
@@ -38,15 +34,8 @@ type DB interface {
 var _ DB = &GeoDB{}
 
 type GeoDB struct {
-	asnMu  sync.RWMutex
-	cityMu sync.RWMutex
-
-	asn      *geoip2.ASNReader
-	asnHash  string
-	asnPath  string
-	city     *geoip2.CityReader
-	cityHash string
-	cityPath string
+	asn  *dbFile[*geoip2.ASN]
+	city *dbFile[*geoip2.CityResult]
 
 	locale   string
 	logger   *slog.Logger
@@ -93,45 +82,30 @@ func WithReloadInterval(interval time.Duration) Option {
 // empty path skips loading that database.
 func Open(asnpath, citypath string, opts ...Option) (*GeoDB, error) {
 	db := &GeoDB{
-		asnPath:  asnpath,
-		cityPath: citypath,
-		locale:   "en",
-		logger:   slog.New(slog.DiscardHandler),
+		locale: "en",
+		logger: slog.New(slog.DiscardHandler),
 	}
 
 	for _, o := range opts {
 		o(db)
 	}
 
-	if asnpath != "" {
-		r, err := geoip2.NewASNReaderFromFile(asnpath)
-		if err != nil {
-			return nil, fmt.Errorf("could not load ASN database: %w", err)
-		}
-
-		hash, err := hashFile(asnpath)
-		if err != nil {
-			return nil, fmt.Errorf("could not hash asn database for change detection")
-		}
-
-		db.asn = r
-		db.asnHash = hash
+	asn, err := openDBFile("ASN", asnpath, func(path string) (reader[*geoip2.ASN], error) {
+		return geoip2.NewASNReaderFromFile(path)
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	if citypath != "" {
-		r, err := geoip2.NewCityReaderFromFile(citypath)
-		if err != nil {
-			return nil, fmt.Errorf("could not load city database: %w", err)
-		}
-
-		hash, err := hashFile(citypath)
-		if err != nil {
-			return nil, fmt.Errorf("could not hash city database for change detection")
-		}
-
-		db.city = r
-		db.cityHash = hash
+	city, err := openDBFile("City", citypath, func(path string) (reader[*geoip2.CityResult], error) {
+		return geoip2.NewCityReaderFromFile(path)
+	})
+	if err != nil {
+		return nil, err
 	}
+
+	db.asn = asn
+	db.city = city
 
 	return db, nil
 }
@@ -151,7 +125,7 @@ func (d *GeoDB) lookup(ip net.IP) (Location, error) {
 	var loc Location
 	errs := make([]error, 0)
 
-	asn, err := d.lookupASN(ip)
+	asn, err := d.asn.lookup(ip)
 	switch {
 	case err == nil:
 		loc.ASN = asn.AutonomousSystemNumber
@@ -160,7 +134,7 @@ func (d *GeoDB) lookup(ip net.IP) (Location, error) {
 		errs = append(errs, fmt.Errorf("could not look up ASN: %w", err))
 	}
 
-	city, err := d.lookupCity(ip)
+	city, err := d.city.lookup(ip)
 	switch {
 	case err == nil:
 		loc.Continent = city.Continent.Code
@@ -177,28 +151,6 @@ func (d *GeoDB) lookup(ip net.IP) (Location, error) {
 	return loc, errors.Join(errs...)
 }
 
-func (d *GeoDB) lookupASN(ip net.IP) (*geoip2.ASN, error) {
-	d.asnMu.RLock()
-	defer d.asnMu.RUnlock()
-
-	if d.asn == nil {
-		return nil, fmt.Errorf("no ASN database loaded")
-	}
-
-	return d.asn.Lookup(ip)
-}
-
-func (d *GeoDB) lookupCity(ip net.IP) (*geoip2.CityResult, error) {
-	d.cityMu.RLock()
-	defer d.cityMu.RUnlock()
-
-	if d.city == nil {
-		return nil, fmt.Errorf("no City database loaded")
-	}
-
-	return d.city.Lookup(ip)
-}
-
 // Reload checks the current on-disk hash of the loaded GeoLite2 databases
 // and will reload those files if they have changed.
 // The function will return true if one (or both) databases were reloaded
@@ -209,20 +161,12 @@ func (d *GeoDB) Reload() (bool, error) {
 	errs := make([]error, 0)
 	changed := false
 
-	if change, err := d.reloadASN(); err != nil {
-		errs = append(errs, err)
-	} else {
-		if change {
-			changed = true
+	for _, f := range []interface{ reload() (bool, error) }{d.asn, d.city} {
+		change, err := f.reload()
+		if err != nil {
+			errs = append(errs, err)
 		}
-	}
-
-	if change, err := d.reloadCity(); err != nil {
-		errs = append(errs, err)
-	} else {
-		if change {
-			changed = true
-		}
+		changed = changed || change
 	}
 
 	if changed && d.cache != nil {
@@ -241,7 +185,7 @@ func (d *GeoDB) Run(ctx context.Context) error {
 		return nil
 	}
 
-	d.logger.Info("starting background reload of GeoLite2 databases", "interval", d.interval, "asn", d.asnPath, "city", d.cityPath)
+	d.logger.Info("starting background reload of GeoLite2 databases", "interval", d.interval, "asn", d.asn.path, "city", d.city.path)
 	t := time.NewTicker(d.interval)
 	defer t.Stop()
 
@@ -261,88 +205,4 @@ func (d *GeoDB) Run(ctx context.Context) error {
 			}
 		}
 	}
-}
-
-func (d *GeoDB) reloadASN() (bool, error) {
-	if d.asnPath == "" {
-		return false, nil
-	}
-
-	hash, err := hashFile(d.asnPath)
-	if err != nil {
-		return false, fmt.Errorf("could not hash asn database: %w", err)
-	}
-
-	d.asnMu.RLock()
-	nochange := d.asnHash == hash
-	d.asnMu.RUnlock()
-
-	if nochange {
-		return false, nil
-	}
-
-	data, err := geoip2.NewASNReaderFromFile(d.asnPath)
-	if err != nil {
-		return false, fmt.Errorf("could not load new asn database: %w", err)
-	}
-
-	d.asnMu.Lock()
-	d.asn = data
-	d.asnHash = hash
-	d.asnMu.Unlock()
-
-	return true, nil
-}
-
-func (d *GeoDB) reloadCity() (bool, error) {
-	if d.cityPath == "" {
-		return false, nil
-	}
-
-	hash, err := hashFile(d.cityPath)
-	if err != nil {
-		return false, fmt.Errorf("could not hash city database: %w", err)
-	}
-
-	d.cityMu.RLock()
-	nochange := d.cityHash == hash
-	d.cityMu.RUnlock()
-
-	if nochange {
-		return false, nil
-	}
-
-	data, err := geoip2.NewCityReaderFromFile(d.cityPath)
-	if err != nil {
-		return false, fmt.Errorf("could not load new city database: %w", err)
-	}
-
-	d.cityMu.Lock()
-	d.city = data
-	d.cityHash = hash
-	d.cityMu.Unlock()
-
-	return true, nil
-}
-
-func hashFile(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("opening file: %w", err)
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	hasher := xxh3.New()
-
-	// 1MB buffer balances syscall overhead vs memory use.
-	// Avoid io.Copy's default small buffer for large files.
-	buf := make([]byte, 1<<20)
-	if _, err := io.CopyBuffer(hasher, f, buf); err != nil {
-		return "", fmt.Errorf("hashing file: %w", err)
-	}
-
-	sum := hasher.Sum128()
-	return fmt.Sprintf("%016x%016x", sum.Hi, sum.Lo), nil
 }

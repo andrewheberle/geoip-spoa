@@ -122,6 +122,7 @@ func TestGeoDB_Lookup_NoCityDatabase(t *testing.T) {
 type reloadFixture struct {
 	asnPath, cityPath  string
 	asnEdited, asnOrig []byte
+	cityEdited         []byte
 	cityOrig           []byte
 }
 
@@ -130,6 +131,10 @@ const (
 	origOrg     = "Bredband2 AB"
 	editedOrg   = "Bredband3 AB"
 	corruptData = "not a maxmind database"
+
+	cityIP     = "2.125.160.217"
+	origCity   = "Boxford"
+	editedCity = "Boxfork"
 )
 
 func newReloadFixture(t *testing.T) *reloadFixture {
@@ -150,13 +155,19 @@ func newReloadFixture(t *testing.T) *reloadFixture {
 		t.Fatalf("test ASN database does not contain %q", origOrg)
 	}
 
+	editedCityData := bytes.Replace(city, []byte(origCity), []byte(editedCity), 1)
+	if bytes.Equal(editedCityData, city) {
+		t.Fatalf("test City database does not contain %q", origCity)
+	}
+
 	dir := t.TempDir()
 	f := &reloadFixture{
-		asnPath:   filepath.Join(dir, "asn.mmdb"),
-		cityPath:  filepath.Join(dir, "city.mmdb"),
-		asnOrig:   asn,
-		asnEdited: edited,
-		cityOrig:  city,
+		asnPath:    filepath.Join(dir, "asn.mmdb"),
+		cityPath:   filepath.Join(dir, "city.mmdb"),
+		asnOrig:    asn,
+		asnEdited:  edited,
+		cityOrig:   city,
+		cityEdited: editedCityData,
 	}
 	f.write(t, f.asnPath, asn)
 	f.write(t, f.cityPath, city)
@@ -180,6 +191,15 @@ func lookupOrg(t *testing.T, db geoip.DB) string {
 	return loc.Org
 }
 
+func lookupCity(t *testing.T, db geoip.DB) string {
+	t.Helper()
+	loc, err := db.Lookup(net.ParseIP(cityIP))
+	if err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
+	return loc.City
+}
+
 func TestGeoDB_Reload(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -187,22 +207,33 @@ func TestGeoDB_Reload(t *testing.T) {
 		wantChanged bool
 		wantErr     bool
 		wantOrg     string
+		wantCity    string
 	}{
 		{
-			name:    "unchanged",
-			wantOrg: origOrg,
+			name:     "unchanged",
+			wantOrg:  origOrg,
+			wantCity: origCity,
 		},
 		{
 			name:        "changed",
 			asn:         func(f *reloadFixture) []byte { return f.asnEdited },
 			wantChanged: true,
 			wantOrg:     editedOrg,
+			wantCity:    origCity,
 		},
 		{
-			name:    "corrupt keeps old data",
-			asn:     func(*reloadFixture) []byte { return []byte(corruptData) },
-			wantErr: true,
-			wantOrg: origOrg,
+			name:        "city changed",
+			city:        func(f *reloadFixture) []byte { return f.cityEdited },
+			wantChanged: true,
+			wantOrg:     origOrg,
+			wantCity:    editedCity,
+		},
+		{
+			name:     "corrupt keeps old data",
+			asn:      func(*reloadFixture) []byte { return []byte(corruptData) },
+			wantErr:  true,
+			wantOrg:  origOrg,
+			wantCity: origCity,
 		},
 		{
 			name:        "one changed and one corrupt",
@@ -211,6 +242,7 @@ func TestGeoDB_Reload(t *testing.T) {
 			wantChanged: true,
 			wantErr:     true,
 			wantOrg:     editedOrg,
+			wantCity:    origCity,
 		},
 	}
 	for _, tt := range tests {
@@ -221,6 +253,9 @@ func TestGeoDB_Reload(t *testing.T) {
 			// populate the cache
 			if got := lookupOrg(t, db); got != origOrg {
 				t.Fatalf("Lookup() org = %q, want %q", got, origOrg)
+			}
+			if got := lookupCity(t, db); got != origCity {
+				t.Fatalf("Lookup() city = %q, want %q", got, origCity)
 			}
 
 			if tt.asn != nil {
@@ -241,6 +276,9 @@ func TestGeoDB_Reload(t *testing.T) {
 			// a cached result that survived a change would return the old org
 			if got := lookupOrg(t, db); got != tt.wantOrg {
 				t.Errorf("Lookup() org = %q, want %q", got, tt.wantOrg)
+			}
+			if got := lookupCity(t, db); got != tt.wantCity {
+				t.Errorf("Lookup() city = %q, want %q", got, tt.wantCity)
 			}
 		})
 	}
