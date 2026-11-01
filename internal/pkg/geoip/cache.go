@@ -4,15 +4,12 @@ import (
 	"net"
 	"time"
 
-	"github.com/IncSW/geoip2"
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 // cacheEntry holds a cached lookup result.
 type cacheEntry struct {
-	asn     *geoip2.ASN
-	city    *geoip2.CityResult
-	err     error
+	loc     Location
 	expires time.Time
 }
 
@@ -41,27 +38,29 @@ func NewCachingDB(db DB, size int, ttl time.Duration) (*CachingDB, error) {
 	}, nil
 }
 
-// Lookup will return cached results of a previous Lookup if found or perfom a
-// Lookup against the underlying DB and then cache and return the result.
-func (c *CachingDB) Lookup(ip net.IP) (*geoip2.ASN, *geoip2.CityResult, error) {
+// Lookup will return the cached result of a previous Lookup if found or
+// perform a Lookup against the underlying DB and then cache and return the
+// result. Lookups that return an error are not cached.
+func (c *CachingDB) Lookup(ip net.IP) (Location, error) {
 	key := ip.String()
 
 	if entry, ok := c.cache.Get(key); ok {
 		if c.ttl == 0 || time.Now().Before(entry.expires) {
-			return entry.asn, entry.city, entry.err
+			return entry.loc, nil
 		}
 	}
 
-	asn, city, err := c.db.Lookup(ip)
+	loc, err := c.db.Lookup(ip)
+	if err != nil {
+		return loc, err
+	}
 
 	c.cache.Add(key, cacheEntry{
-		asn:     asn,
-		city:    city,
-		err:     err,
+		loc:     loc,
 		expires: time.Now().Add(c.ttl),
 	})
 
-	return asn, city, err
+	return loc, nil
 }
 
 // Reload delegates to the underlying DB and purges the cache on success,

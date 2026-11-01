@@ -22,7 +22,6 @@ const MessageName = "geoip-lookup"
 
 type Server struct {
 	addr     string
-	locale   string
 	logger   *slog.Logger
 	db       geoip.DB
 	registry *prometheus.Registry
@@ -41,7 +40,6 @@ func NewServer(addr string, db geoip.DB, opts ...ServerOption) (*Server, error) 
 		addr:     addr,
 		db:       db,
 		logger:   slog.New(slog.DiscardHandler),
-		locale:   "en",
 		registry: prometheus.NewRegistry(),
 		ctx:      ctx,
 		cancel:   cancel,
@@ -72,7 +70,7 @@ func NewServer(addr string, db geoip.DB, opts ...ServerOption) (*Server, error) 
 }
 
 func (s *Server) ListenAndServe() error {
-	s.logger.Info("starting SPOA server", "listen", s.addr, "locale", s.locale)
+	s.logger.Info("starting SPOA server", "listen", s.addr)
 	l, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		s.logger.Error("could not create listener", "error", err)
@@ -126,7 +124,7 @@ func (s *Server) handler(req *request.Request) {
 	msg, err := req.Messages.GetByName(MessageName)
 	if err != nil {
 		status = "error"
-		s.logger.Info("message was not found")
+		logger.Info("message was not found")
 		return
 	}
 
@@ -145,31 +143,25 @@ func (s *Server) handler(req *request.Request) {
 	}
 	logger = logger.With("ip", ip)
 
-	asn, city, err := s.db.Lookup(ip)
+	loc, err := s.db.Lookup(ip)
 	if err != nil {
 		status = "error"
 		logger.Error("error looking up ip address", "error", err)
 	}
 
-	// handle city in case it's missing or not available in chosen locale
-	cityName, ok := city.City.Names[s.locale]
-	if !ok {
-		logger.Warn("city name for chosen locale was not available", "locale", s.locale)
-	}
-
 	// add vars to the request
-	req.Actions.SetVar(action.ScopeTransaction, "asn", asn.AutonomousSystemNumber)
-	req.Actions.SetVar(action.ScopeTransaction, "org", asn.AutonomousSystemOrganization)
-	req.Actions.SetVar(action.ScopeTransaction, "continent", city.Continent.Code)
-	req.Actions.SetVar(action.ScopeTransaction, "country", city.Country.ISOCode)
-	req.Actions.SetVar(action.ScopeTransaction, "city", cityName)
+	req.Actions.SetVar(action.ScopeTransaction, "asn", loc.ASN)
+	req.Actions.SetVar(action.ScopeTransaction, "org", loc.Org)
+	req.Actions.SetVar(action.ScopeTransaction, "continent", loc.Continent)
+	req.Actions.SetVar(action.ScopeTransaction, "country", loc.Country)
+	req.Actions.SetVar(action.ScopeTransaction, "city", loc.City)
 
 	logger.Debug("handled request",
-		"asn", asn.AutonomousSystemNumber,
-		"org", asn.AutonomousSystemOrganization,
-		"continent", city.Continent.Code,
-		"country", city.Country.ISOCode,
-		"city", cityName,
+		"asn", loc.ASN,
+		"org", loc.Org,
+		"continent", loc.Continent,
+		"country", loc.Country,
+		"city", loc.City,
 	)
 }
 

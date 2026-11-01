@@ -1,5 +1,16 @@
 # AGENTS.md
 
+## Checks
+
+Run all of these and make sure they pass before committing or pushing:
+
+```sh
+go build ./...
+go vet ./...
+go test -race ./...
+golangci-lint run
+```
+
 ## Agent skills
 
 ### Issue tracker
