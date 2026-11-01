@@ -6,6 +6,16 @@ This is a Stream Processing Offload Agent (SPOA) for use with HAProxy to
 perform GeoIP lookups of requests so access or routing decisions can be
 made based on ASN, Organisation, City, Country and/or Continent.
 
+## Usage
+
+A container image is published that can be run as follows:
+
+```sh
+docker run -p 3000:3000 ghcr.io/andrewheberle/geoip-spoa:v0.5.1 # x-release-please-version
+```
+
+Binaries and APT packages are available from the Releases page.
+
 ## GeoIP Databases
 
 The agent uses the GeoLite2 ASN and City databases in MMDB format from MaxMind
@@ -122,7 +132,6 @@ options from lower levels:
 2. Configuration file
 3. Environment variables
 4. Command line flags
-
 
 ### Command Line
 
