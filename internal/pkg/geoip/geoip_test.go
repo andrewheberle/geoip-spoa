@@ -1,132 +1,179 @@
 package geoip_test
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/andrewheberle/geoip-spoa/internal/pkg/geoip"
 )
 
-func TestGeoDB_Lookup(t *testing.T) {
-	db, err := geoip.Open("../../../testdata/GeoLite2-ASN-Test.mmdb", "../../../testdata/GeoLite2-City-Test.mmdb")
+const (
+	testASN  = "../../../testdata/GeoLite2-ASN-Test.mmdb"
+	testCity = "../../../testdata/GeoLite2-City-Test.mmdb"
+)
+
+var lookupTests = []struct {
+	name string
+	ip   string
+	want geoip.Location
+}{
+	{"found both", "89.160.20.112", geoip.Location{ASN: 29518, Org: "Bredband2 AB", Continent: "EU", Country: "SE", City: "Linköping"}},
+	{"both not found", "1.2.3.4", geoip.Location{}},
+	{"only got city", "2.125.160.217", geoip.Location{Continent: "EU", Country: "GB", City: "Boxford"}},
+	{"only got asn", "1.128.0.1", geoip.Location{ASN: 1221, Org: "Telstra Pty Ltd"}},
+	{"country without city", "2a02:ff40::", geoip.Location{Continent: "EU", Country: "IM"}},
+}
+
+func open(t testing.TB, asn, city string, opts ...geoip.Option) *geoip.GeoDB {
+	t.Helper()
+	db, err := geoip.Open(asn, city, opts...)
 	if err != nil {
-		panic(err)
+		t.Fatalf("Open() error = %v", err)
 	}
+	return db
+}
 
-	tests := []struct {
-		name     string
-		ip       net.IP
-		wantAsn  uint32
-		wantCity string
-		wantErr  bool
-	}{
-		{"found both", net.ParseIP("89.160.20.112"), 29518, "Linköping", false},
-		{"both not found", net.ParseIP("1.2.3.4"), 0, "", true},
-		{"only got city", net.ParseIP("2.125.160.217"), 0, "Boxford", true},
-		{"only got asn", net.ParseIP("1.128.0.1"), 1221, "", true},
-	}
-	for _, tt := range tests {
+func runLookupTests(t *testing.T, db geoip.DB) {
+	t.Helper()
+	for _, tt := range lookupTests {
 		t.Run(tt.name, func(t *testing.T) {
+			got, err := db.Lookup(net.ParseIP(tt.ip))
 			if err != nil {
-				t.Fatalf("could not construct receiver type: %v", err)
+				t.Fatalf("Lookup() error = %v", err)
 			}
-			asn, city, gotErr := db.Lookup(tt.ip)
-			if gotErr != nil {
-				if !tt.wantErr {
-					t.Errorf("Lookup() failed: %v", gotErr)
-				}
-			} else {
-				if tt.wantErr {
-					t.Fatal("Lookup() succeeded unexpectedly")
-				}
-			}
-
-			if asn.AutonomousSystemNumber != tt.wantAsn {
-				t.Errorf("Lookup() = asn %v, want %v", asn.AutonomousSystemNumber, tt.wantAsn)
-			}
-			name, ok := city.City.Names["en"]
-			if !ok {
-				name = ""
-			}
-			if name != tt.wantCity {
-				t.Errorf("Lookup() = city %v, want %v", name, tt.wantCity)
+			if got != tt.want {
+				t.Errorf("Lookup() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
 }
 
+func TestGeoDB_Lookup(t *testing.T) {
+	runLookupTests(t, open(t, testASN, testCity))
+}
+
 func TestCachingDB_Lookup(t *testing.T) {
-	db, err := geoip.Open("../../../testdata/GeoLite2-ASN-Test.mmdb", "../../../testdata/GeoLite2-City-Test.mmdb")
+	cache, err := geoip.NewCachingDB(open(t, testASN, testCity), 10, time.Minute)
 	if err != nil {
-		panic(err)
-	}
-	cache, err := geoip.NewCachingDB(db, 10, time.Second*60)
-	if err != nil {
-		panic(err)
+		t.Fatalf("NewCachingDB() error = %v", err)
 	}
 
+	// run twice so the second pass is served from the cache
+	runLookupTests(t, cache)
+	runLookupTests(t, cache)
+}
+
+func TestGeoDB_Lookup_Locale(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	db := open(t, testASN, testCity, geoip.WithLocale("xx"), geoip.WithLogger(logger))
+
+	got, err := db.Lookup(net.ParseIP("89.160.20.112"))
+	if err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
+	want := geoip.Location{ASN: 29518, Org: "Bredband2 AB", Continent: "EU", Country: "SE"}
+	if got != want {
+		t.Errorf("Lookup() = %+v, want %+v", got, want)
+	}
+	if !strings.Contains(buf.String(), "city name for chosen locale was not available") {
+		t.Errorf("expected locale warning, got log %q", buf.String())
+	}
+
+	// no city record at all: no warning
+	buf.Reset()
+	if _, err := db.Lookup(net.ParseIP("2a02:ff40::")); err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("expected no log output, got %q", buf.String())
+	}
+
+	// other locales are available
+	de := open(t, testASN, testCity, geoip.WithLocale("de"))
+	got, err = de.Lookup(net.ParseIP("81.2.69.160"))
+	if err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
+	if got.City != "London" {
+		t.Errorf("Lookup() city = %q, want %q", got.City, "London")
+	}
+}
+
+func TestGeoDB_Lookup_NoCityDatabase(t *testing.T) {
+	db := open(t, testASN, "")
+
+	got, err := db.Lookup(net.ParseIP("89.160.20.112"))
+	if err == nil {
+		t.Fatal("Lookup() succeeded unexpectedly")
+	}
+	want := geoip.Location{ASN: 29518, Org: "Bredband2 AB"}
+	if got != want {
+		t.Errorf("Lookup() = %+v, want %+v", got, want)
+	}
+}
+
+// countingDB is an in-memory DB adapter that counts lookups.
+type countingDB struct {
+	loc   geoip.Location
+	err   error
+	calls int
+}
+
+func (c *countingDB) Lookup(net.IP) (geoip.Location, error) {
+	c.calls++
+	return c.loc, c.err
+}
+
+func (c *countingDB) Reload() (bool, error) { return false, nil }
+
+func TestCachingDB_Lookup_DoesNotCacheErrors(t *testing.T) {
 	tests := []struct {
-		name     string
-		ip       net.IP
-		wantAsn  uint32
-		wantCity string
-		wantErr  bool
+		name      string
+		err       error
+		wantCalls int
 	}{
-		{"found both", net.ParseIP("89.160.20.112"), 29518, "Linköping", false},
-		{"both not found", net.ParseIP("1.2.3.4"), 0, "", true},
-		{"only got city", net.ParseIP("2.125.160.217"), 0, "Boxford", true},
-		{"only got asn", net.ParseIP("1.128.0.1"), 1221, "", true},
+		{"success is cached", nil, 1},
+		{"error is not cached", errors.New("boom"), 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			inner := &countingDB{loc: geoip.Location{Country: "AU"}, err: tt.err}
+			cache, err := geoip.NewCachingDB(inner, 10, 0)
 			if err != nil {
-				t.Fatalf("could not construct receiver type: %v", err)
-			}
-			asn, city, gotErr := cache.Lookup(tt.ip)
-			if gotErr != nil {
-				if !tt.wantErr {
-					t.Errorf("Lookup() failed: %v", gotErr)
-				}
-			} else {
-				if tt.wantErr {
-					t.Fatal("Lookup() succeeded unexpectedly")
-				}
+				t.Fatalf("NewCachingDB() error = %v", err)
 			}
 
-			if asn.AutonomousSystemNumber != tt.wantAsn {
-				t.Errorf("Lookup() = asn %v, want %v", asn.AutonomousSystemNumber, tt.wantAsn)
+			ip := net.ParseIP("192.0.2.1")
+			for range 2 {
+				if _, err := cache.Lookup(ip); !errors.Is(err, tt.err) {
+					t.Fatalf("Lookup() error = %v, want %v", err, tt.err)
+				}
 			}
-			name, ok := city.City.Names["en"]
-			if !ok {
-				name = ""
-			}
-			if name != tt.wantCity {
-				t.Errorf("Lookup() = city %v, want %v", name, tt.wantCity)
+			if inner.calls != tt.wantCalls {
+				t.Errorf("underlying Lookup calls = %d, want %d", inner.calls, tt.wantCalls)
 			}
 		})
 	}
 }
 
 func BenchmarkLookup_Uncached(b *testing.B) {
-	db, err := geoip.Open("../../../testdata/GeoLite2-ASN-Test.mmdb", "../../../testdata/GeoLite2-City-Test.mmdb")
-	if err != nil {
-		panic(err)
-	}
+	db := open(b, testASN, testCity)
 	ip := net.ParseIP("8.8.8.8")
 
 	b.ResetTimer()
 	for b.Loop() {
-		_, _, _ = db.Lookup(ip)
+		_, _ = db.Lookup(ip)
 	}
 }
 
 func BenchmarkLookup_Cached(b *testing.B) {
-	db, err := geoip.Open("../../../testdata/GeoLite2-ASN-Test.mmdb", "../../../testdata/GeoLite2-City-Test.mmdb")
-	if err != nil {
-		panic(err)
-	}
-	cache, err := geoip.NewCachingDB(db, 100, time.Minute)
+	cache, err := geoip.NewCachingDB(open(b, testASN, testCity), 100, time.Minute)
 	if err != nil {
 		b.Fatalf("NewCachingDB() error = %v", err)
 	}
@@ -134,6 +181,6 @@ func BenchmarkLookup_Cached(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		_, _, _ = cache.Lookup(ip)
+		_, _ = cache.Lookup(ip)
 	}
 }

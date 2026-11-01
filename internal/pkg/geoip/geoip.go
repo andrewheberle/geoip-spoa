@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -12,8 +13,25 @@ import (
 	"github.com/zeebo/xxh3"
 )
 
+// Location holds the geographic and network facts about one IP address that
+// are returned to HAProxy. Any value that could not be found is left as its
+// zero value.
+type Location struct {
+	ASN       uint32
+	Org       string
+	Continent string
+	Country   string
+	City      string
+}
+
+// DB looks up the Location of IP addresses and can reload its underlying data.
 type DB interface {
-	Lookup(ip net.IP) (*geoip2.ASN, *geoip2.CityResult, error)
+	// Lookup returns the Location of ip. An IP address that is missing from
+	// one or both databases is not an error: the fields that could not be
+	// found are left empty. An error is only returned for a real failure,
+	// in which case any fields that were found are still populated.
+	Lookup(ip net.IP) (Location, error)
+	// Reload reports whether the underlying data changed.
 	Reload() (bool, error)
 }
 
@@ -29,12 +47,40 @@ type GeoDB struct {
 	city     *geoip2.CityReader
 	cityHash string
 	cityPath string
+
+	locale string
+	logger *slog.Logger
 }
 
-func Open(asnpath, citypath string) (*GeoDB, error) {
+// Option configures a GeoDB.
+type Option func(*GeoDB)
+
+// WithLocale sets the locale used for City names. The default is "en".
+func WithLocale(locale string) Option {
+	return func(d *GeoDB) {
+		d.locale = locale
+	}
+}
+
+// WithLogger sets the logger. By default nothing is logged.
+func WithLogger(logger *slog.Logger) Option {
+	return func(d *GeoDB) {
+		d.logger = logger
+	}
+}
+
+// Open loads the GeoLite2 ASN and City databases from the given paths. An
+// empty path skips loading that database.
+func Open(asnpath, citypath string, opts ...Option) (*GeoDB, error) {
 	db := &GeoDB{
 		asnPath:  asnpath,
 		cityPath: citypath,
+		locale:   "en",
+		logger:   slog.New(slog.DiscardHandler),
+	}
+
+	for _, o := range opts {
+		o(db)
 	}
 
 	if asnpath != "" {
@@ -71,49 +117,55 @@ func Open(asnpath, citypath string) (*GeoDB, error) {
 }
 
 // Lookup performs a GeoIP lookup against the underlying GeoLite2 ASN and City
-// databases. If an error occurs during either lookup one (or both) errors are
-// returned along with minimal "zero value" geoip2.ASN and geoip2.CityResult
-// results rather than returning nil values.
-func (d *GeoDB) Lookup(ip net.IP) (*geoip2.ASN, *geoip2.CityResult, error) {
+// databases. See DB.Lookup for the error contract.
+func (d *GeoDB) Lookup(ip net.IP) (Location, error) {
+	var loc Location
 	errs := make([]error, 0)
 
 	asn, err := d.lookupASN(ip)
-	if err != nil {
+	switch {
+	case err == nil:
+		loc.ASN = asn.AutonomousSystemNumber
+		loc.Org = asn.AutonomousSystemOrganization
+	case !errors.Is(err, geoip2.ErrNotFound):
 		errs = append(errs, fmt.Errorf("could not look up ASN: %w", err))
-		asn = &geoip2.ASN{}
 	}
 
 	city, err := d.lookupCity(ip)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("could not look up City: %w", err))
-		city = &geoip2.CityResult{
-			City: geoip2.City{
-				Names: make(map[string]string),
-			},
+	switch {
+	case err == nil:
+		loc.Continent = city.Continent.Code
+		loc.Country = city.Country.ISOCode
+		if name, ok := city.City.Names[d.locale]; ok {
+			loc.City = name
+		} else if city.City.GeoNameID != 0 {
+			d.logger.Warn("city name for chosen locale was not available", "ip", ip, "locale", d.locale, "geonameid", city.City.GeoNameID)
 		}
+	case !errors.Is(err, geoip2.ErrNotFound):
+		errs = append(errs, fmt.Errorf("could not look up City: %w", err))
 	}
 
-	return asn, city, errors.Join(errs...)
+	return loc, errors.Join(errs...)
 }
 
 func (d *GeoDB) lookupASN(ip net.IP) (*geoip2.ASN, error) {
+	d.asnMu.RLock()
+	defer d.asnMu.RUnlock()
+
 	if d.asn == nil {
 		return nil, fmt.Errorf("no ASN database loaded")
 	}
-
-	d.asnMu.RLock()
-	defer d.asnMu.RUnlock()
 
 	return d.asn.Lookup(ip)
 }
 
 func (d *GeoDB) lookupCity(ip net.IP) (*geoip2.CityResult, error) {
+	d.cityMu.RLock()
+	defer d.cityMu.RUnlock()
+
 	if d.city == nil {
 		return nil, fmt.Errorf("no City database loaded")
 	}
-
-	d.cityMu.RLock()
-	defer d.cityMu.RUnlock()
 
 	return d.city.Lookup(ip)
 }

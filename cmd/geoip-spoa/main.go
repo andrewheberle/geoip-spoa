@@ -69,9 +69,10 @@ func main() {
 	var db geoip.DB
 	asnPath := k.String("db.asn")
 	cityPath := k.String("db.city")
-	db, err = geoip.Open(asnPath, cityPath)
+	localeString := k.String("locale")
+	db, err = geoip.Open(asnPath, cityPath, geoip.WithLocale(localeString), geoip.WithLogger(logger))
 	if err != nil {
-		logger.Error("there was an error loading the databases", "error", err, "asn", asnPath, "city", cityPath)
+		logger.Error("there was an error loading the databases", "error", err, "asn", asnPath, "city", cityPath, "locale", localeString)
 		os.Exit(1)
 	}
 
@@ -89,10 +90,9 @@ func main() {
 	}
 
 	listenString := k.String("listen")
-	localeString := k.String("locale")
-	srv, err := spoa.NewServer(listenString, db, spoa.WithLogger(logger), spoa.WithLocale(k.String("locale")))
+	srv, err := spoa.NewServer(listenString, db, spoa.WithLogger(logger))
 	if err != nil {
-		logger.Error("there was a problem setting up the server", "error", err, "listen", listenString, "locale", localeString)
+		logger.Error("there was a problem setting up the server", "error", err, "listen", listenString)
 		os.Exit(1)
 	}
 
@@ -102,7 +102,7 @@ func main() {
 		return srv.ListenAndServe()
 	}, func(err error) {
 		if err != nil {
-			logger.Error("got error from server", "error", err, "listen", listenString, "locale", localeString)
+			logger.Error("got error from server", "error", err, "listen", listenString)
 		}
 		_ = srv.Shutdown()
 	})
