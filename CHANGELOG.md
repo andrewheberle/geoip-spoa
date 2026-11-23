@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.5](https://github.com/andrewheberle/geoip-spoa/compare/v0.5.4...v0.5.5) (2026-11-23)
+
+
+### Bug Fixes
+
+* **deps:** update cgr.dev/chainguard/static:latest docker digest to 8658e9e ([#54](https://github.com/andrewheberle/geoip-spoa/issues/54)) ([5a027d4](https://github.com/andrewheberle/geoip-spoa/commit/5a027d46c1e60c517d5c784f16531de9033ae5b7))
+
 ## [0.5.4](https://github.com/andrewheberle/geoip-spoa/compare/v0.5.3...v0.5.4) (2026-11-02)
 
 
